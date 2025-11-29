@@ -1,0 +1,9 @@
+logging:
+  no_color: false
+  level: "debug"
+  format: text
+  add_source: false
+
+server_addr: ":8080"
+max_visitor_count: 2
+request_timeout: 10
