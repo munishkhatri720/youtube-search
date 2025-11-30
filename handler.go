@@ -40,7 +40,10 @@ func (srv *Server) MakeSearchHandler(searchType SearchType) http.HandlerFunc {
 			return
 		}
 
-		if isrcPattern.MatchString(query) {
+		if isrcPattern.MatchString(query) || strings.HasPrefix(strings.ToLower(query), "isrc:") {
+			if strings.HasPrefix(strings.ToLower(query), "isrc:") {
+				query = strings.TrimSpace(query[5:])
+			}
 			searchType = SearchTypeYouTubeMusic
 		}
 
