@@ -26,7 +26,7 @@ const (
 var innertubeContextPattern = regexp.MustCompile(
 	`["']INNERTUBE_CONTEXT["']\s*:\s*({.*)\s*["']INNERTUBE_CONTEXT_CLIENT_NAME["']`,
 )
-
+var isrcPattern = regexp.MustCompile(`^[A-Z]{2}[A-Z0-9]{3}[0-9]{2}[0-9]{5}$`)
 const YT_VIDEO_FILTER_PARAM = "EgWKAQIQAWoQEAMQBRAEEAkQChAVEBAQEQ%3D%3D"
 const YT_SONG_FILTER_PARAM = "EgWKAQIIAWoQEAMQBRAEEAkQChAVEBAQEQ%3D%3D"
 const YT_MUSIC_BASE_URL = "https://music.youtube.com"
@@ -38,6 +38,10 @@ func (srv *Server) MakeSearchHandler(searchType SearchType) http.HandlerFunc {
 		if strings.TrimSpace(query) == "" {
 			http.Error(writer, "query parameter is required", http.StatusBadRequest)
 			return
+		}
+
+		if isrcPattern.MatchString(query) {
+			searchType = SearchTypeYouTubeMusic
 		}
 
 		results, err := srv.searchFromYouTube(req.Context(), searchType, query)
@@ -171,6 +175,11 @@ func (srv *Server) searchFromYouTube(
 			slog.Error("Failed to store search results in cache", "error", err)
 		} else {
 			slog.Info("Stored search results in cache", "key", cacheKey)
+		}
+	}
+	if searchType == SearchTypeYouTube && len(parsed) != 0 {
+		for _ , item := range parsed {
+			item.Uri = "https://www.youtube.com/watch?v=" + item.Identifier
 		}
 	}
 	return parsed, err
