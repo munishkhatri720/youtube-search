@@ -39,6 +39,36 @@ func (srv *Server) RandomVisitor() *YouTubeVisitorData {
 	return srv.visitors[randomIndex]
 }
 
+func (srv *Server) RotateVisitors(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			slog.Info("Stopping visitor rotation")
+			return
+		case <-srv.ticker.C:
+			srv.mu.Lock()
+			defer srv.mu.Unlock()
+			if len(srv.visitors) == 0 {
+				continue
+			} else {
+				for i, visitor := range srv.visitors {
+					if visitor.IsExpired() {
+						slog.Info("Rotating expired visitor data", slog.Any("visitor", visitor.VisitorID()))
+						newVisitor, err := srv.fetchInnertubeContext(ctx)
+						if err != nil {
+							slog.Error("Failed to fetch new visitor data", "error", err)
+						} else {
+							srv.visitors[i] = newVisitor
+							slog.Info("Rotated visitor data", slog.Any("visitor", newVisitor.VisitorID()))
+						}
+					}
+				}
+			}
+
+		}
+	}
+}
+
 func (srv *Server) Start(ctx context.Context) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/youtube/search", srv.MakeSearchHandler(SearchTypeYouTube))
@@ -48,7 +78,7 @@ func (srv *Server) Start(ctx context.Context) {
 			return ctx
 		},
 		Addr:    srv.Cfg.ServerAddr,
-		Handler: mux,
+		Handler: PanicRecovery(RequestLogger(mux)),
 	}
 	go func() {
 		if err := srv.srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

@@ -7,12 +7,20 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
+
+type ipv6SupportCache struct {
+	lastChecked time.Time
+	supported   bool
+}
 
 type HttpClient struct {
 	*http.Client
 	Ipv6Block string
+	cache     map[string]ipv6SupportCache
+	mu        sync.Mutex
 }
 
 func (client *HttpClient) OnRequest(req *http.Request) {
@@ -20,14 +28,18 @@ func (client *HttpClient) OnRequest(req *http.Request) {
 		req.Header.Set("Content-Type", "application/json")
 		ivs, ok := req.Context().Value(VisitorDataContextKey).(string)
 		if ok && ivs != "" {
-			slog.Debug("Setting x-goog-visitor-id", "visitor_id", ivs)
 			req.Header.Set("x-goog-visitor-id", ivs)
+			if len(ivs) > 50 {
+				ivs = ivs[:50]
+			}
+			slog.Debug("Setting x-goog-visitor-id", "visitor_id", ivs)
+
 		}
 	}
 	req.Header.Set("x-origin", "https://music.youtube.com")
 	// close the tcp connection after request to rotate the ipv6 address
 	req.Header.Set("Connection", "close")
-	req.Header.Set("Cookie" , "SOCS=CAI;")
+	req.Header.Set("Cookie", "SOCS=CAI;")
 	req.Header.Set(
 		"User-Agent",
 		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3",
@@ -129,7 +141,24 @@ func (client *HttpClient) TransportDialContext(
 ) (net.Conn, error) {
 	slog.Debug("Connecting to Address", "addr", addr, "network", network)
 
-	ipv6Supported := client.IsIpv6Supported(network, addr)
+	client.mu.Lock()
+	defer client.mu.Unlock()
+
+	ipv6Supported := false
+	cached, ok := client.cache[addr]
+	if !ok || time.Since(cached.lastChecked) > 30*time.Minute {
+		fetched := client.IsIpv6Supported(network, addr)
+		client.cache[addr] = ipv6SupportCache{
+			lastChecked: time.Now(),
+			supported:   fetched,
+		}
+		slog.Debug("ipv6 support cache updated", "addr", addr, "supported", cached)
+		ipv6Supported = fetched
+	} else {
+		ipv6Supported = cached.supported
+		slog.Debug("using cached ipv6 support value", "addr", addr, "supported", cached)
+	}
+
 	dialer := &net.Dialer{
 		Timeout:   30 * time.Second,
 		KeepAlive: 30 * time.Second,
@@ -155,7 +184,7 @@ func (client *HttpClient) TransportDialContext(
 
 func NewHttpClient(timeoutSeconds int, ipv6Subnet string) *HttpClient {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
-	client := &HttpClient{Ipv6Block: ipv6Subnet}
+	client := &HttpClient{Ipv6Block: ipv6Subnet, cache: make(map[string]ipv6SupportCache)}
 	transport.DialContext = client.TransportDialContext
 	client.Client = &http.Client{
 		Timeout:   time.Duration(timeoutSeconds) * time.Second,

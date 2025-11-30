@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 )
 
 func main() {
@@ -36,6 +37,7 @@ func main() {
 	server.Start(ctx)
 	slog.Info("Server started", "address", cfg.ServerAddr)
 	server.visitors = make([]*YouTubeVisitorData, 0)
+	server.ticker = time.NewTicker(30 * time.Minute)
 
 	for i := 0; i < cfg.MaxVisitorCount; i++ {
 		visitor, err := server.fetchInnertubeContext(ctx)
@@ -46,6 +48,8 @@ func main() {
 			server.visitors = append(server.visitors, visitor)
 		}
 	}
+
+	go server.RotateVisitors(ctx)
 
 	shutdownCtx, shutdownCancel := signal.NotifyContext(
 		ctx,
