@@ -88,7 +88,7 @@ func (client *HttpClient) GenerateRandomIpV6() string {
 		return ""
 	}
 
-	base := ipNet.IP.To16() // each block in an ipv6 address is 16 bytes (total 8 block)
+	base := ipNet.IP.To16() // each block in an ipv6 address is 16 bit (=2byte) (total 8 block)
 	// [u16]:[u16]:[u16]:[u16]:[u16]:[u16]:[u16]:[u16]
 	if base == nil {
 		slog.Error("not an ipv6 network", "subnet", client.Ipv6Block)
