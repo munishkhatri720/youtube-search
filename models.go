@@ -193,7 +193,7 @@ func parseYouTubeSearchResults(data []byte) ([]YouTubeTrack, error) {
 		data,
 		"contents.tabbedSearchResultsRenderer.tabs.0.tabRenderer.content.sectionListRenderer.contents.0.musicShelfRenderer.contents",
 	)
-	if result.Exists() == false {
+	if !result.Exists() {
 		return nil, fmt.Errorf(
 			"array of musicResponsiveListItemRenderer doesn't found in the data",
 		)

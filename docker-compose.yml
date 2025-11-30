@@ -1,0 +1,18 @@
+services:
+  youtube-searchapi:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: youtube-searchapi
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./cache.db:/app/cache.db
+    restart: unless-stopped
+    ##network_mode : "host"  if u need ipv6 rotation
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/api/youtube/search?query=test"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
