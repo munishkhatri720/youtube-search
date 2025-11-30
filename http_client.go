@@ -112,7 +112,7 @@ func (client *HttpClient) GenerateRandomIpV6() string {
 	// each block is 16 bits => 2 bytes
 	ip := make([]byte, 16)
 	// copied base to the ip as some starting blocks are already fixed by the subnet mask
-	// e.g., in 2001:0db8:85a3::/64, first 64 bits are fixed
+	// e.g., in 2001:0db8:85a3:abcd::/64, first 64 bits are fixed
 	// eg., in 2001:0db8:85a3::/48, first 48 bits are fixed so we have to fill rest of the 5 blocks randomly
 	copy(ip, base)
 
