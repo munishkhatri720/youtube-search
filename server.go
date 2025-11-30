@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"log/slog"
 	"math/rand/v2"
 	"net"
 	"net/http"
 	"sync"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 type Server struct {
@@ -18,6 +21,7 @@ type Server struct {
 	Cfg        *Config
 	mu         sync.Mutex
 	faultCount int
+	db         *sql.DB
 }
 
 func (srv *Server) RandomVisitor() *YouTubeVisitorData {
@@ -27,7 +31,12 @@ func (srv *Server) RandomVisitor() *YouTubeVisitorData {
 		slog.Info("Fetching new visitor data", "current_count", len(srv.visitors))
 		visitor, err := srv.fetchInnertubeContext(context.Background())
 		if err == nil {
-			slog.Info("Fetched new visitor data", slog.Any("visitor", visitor.VisitorID()))
+			idx := visitor.VisitorID()
+			if len(visitor.VisitorID()) > 50 {
+				idx = visitor.VisitorID()[:50] + "..."
+
+			}
+			slog.Info("Fetched new visitor data", slog.Any("visitor", idx))
 			srv.visitors = append(srv.visitors, visitor)
 			return visitor
 		}
@@ -53,7 +62,12 @@ func (srv *Server) RotateVisitors(ctx context.Context) {
 			} else {
 				for i, visitor := range srv.visitors {
 					if visitor.IsExpired() {
-						slog.Info("Rotating expired visitor data", slog.Any("visitor", visitor.VisitorID()))
+						idx := visitor.VisitorID()
+						if len(visitor.VisitorID()) > 50 {
+							idx = visitor.VisitorID()[:50] + "..."
+
+						}
+						slog.Info("Rotating expired visitor data", slog.Any("visitor", idx))
 						newVisitor, err := srv.fetchInnertubeContext(ctx)
 						if err != nil {
 							slog.Error("Failed to fetch new visitor data", "error", err)
@@ -67,6 +81,42 @@ func (srv *Server) RotateVisitors(ctx context.Context) {
 
 		}
 	}
+}
+
+func (srv *Server) ConnectDb(ctx context.Context) error {
+	slog.Info("Connecting to database", "path", srv.Cfg.Caching.CacheDir)
+	conn, err := sql.Open("sqlite", srv.Cfg.Caching.CacheDir)
+	if err != nil {
+		return err
+	}
+
+	if err := conn.PingContext(ctx); err != nil {
+		return err
+	}
+
+	slog.Info("Connected to database successfully")
+
+	_, _ = conn.Exec(
+		`PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000;`,
+	)
+
+	schema := `
+	CREATE TABLE IF NOT EXISTS caches (
+		key TEXT PRIMARY KEY,
+		value BLOB,
+		timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+	CREATE INDEX IF NOT EXISTS idx_caches_key ON caches (key);`
+
+	_, err = conn.Exec(schema)
+	if err != nil {
+		return err
+	}
+
+	go srv.EnforceCacheLimit(ctx)
+
+	srv.db = conn
+	return nil
 }
 
 func (srv *Server) Start(ctx context.Context) {

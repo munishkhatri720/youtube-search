@@ -14,12 +14,19 @@ type LogConfig struct {
 	NoColor   bool       `yaml:"no_color"`
 }
 
+type CacheConfig struct {
+	Enabled       bool   `yaml:"enabled"`
+	CacheDir      string `yaml:"cache_dir"`
+	CacheMaxLimit int64  `yaml:"cache_max_limit"`
+}
+
 type Config struct {
-	Ipv6Subnet      string    `yaml:"ipv6_subnet"`
-	MaxVisitorCount int       `yaml:"max_visitor_count"`
-	RequestTimeout  int       `yaml:"request_timeout"`
-	ServerAddr      string    `yaml:"server_addr"`
-	Logging         LogConfig `yaml:"logging"`
+	Ipv6Subnet      string      `yaml:"ipv6_subnet"`
+	MaxVisitorCount int         `yaml:"max_visitor_count"`
+	RequestTimeout  int         `yaml:"request_timeout"`
+	ServerAddr      string      `yaml:"server_addr"`
+	Logging         LogConfig   `yaml:"logging"`
+	Caching         CacheConfig `yaml:"caching"`
 }
 
 func (cfg Config) String() string {
@@ -43,6 +50,14 @@ func ReadConfig(filePath string) (*Config, error) {
 	var cfg Config
 	if err := yaml.NewDecoder(file).Decode(&cfg); err != nil {
 		return nil, err
+	}
+
+	if cfg.Caching.Enabled && cfg.Caching.CacheDir == "" {
+		cfg.Caching.CacheDir = "./cache.db"
+	}
+
+	if cfg.Caching.Enabled && cfg.Caching.CacheMaxLimit == 0 {
+		cfg.Caching.CacheMaxLimit = -1 // no limit
 	}
 
 	if cfg.MaxVisitorCount <= 0 {

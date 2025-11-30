@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
@@ -98,6 +99,21 @@ func (srv *Server) searchFromYouTube(
 	searchType SearchType,
 	query string,
 ) ([]YouTubeTrack, error) {
+	if srv.db != nil {
+		cacheKey := srv.createCacheKey(searchType, query)
+		cachedData, err := srv.LookupCache(ctx, cacheKey)
+		if err != nil {
+			slog.Error("Failed to lookup cache", "error", err)
+		} else if cachedData != nil {
+			var result []YouTubeTrack
+			if err := json.Unmarshal(cachedData, &result); err != nil {
+				slog.Error("Failed to unmarshal cached search results", "error", err)
+			} else {
+				slog.Info("Returning cached search results", "key", cacheKey)
+				return result, nil
+			}
+		}
+	}
 	visitor := srv.RandomVisitor()
 
 	vCtx := context.WithValue(
@@ -148,5 +164,14 @@ func (srv *Server) searchFromYouTube(
 		return nil, fmt.Errorf("failed to read search response body: %w", err)
 	}
 
-	return parseYouTubeSearchResults(respBody)
+	parsed, err := parseYouTubeSearchResults(respBody)
+	if err == nil && len(parsed) > 0 && srv.db != nil {
+		cacheKey := srv.createCacheKey(searchType, query)
+		if err := srv.StoreCache(vCtx, cacheKey, parsed); err != nil {
+			slog.Error("Failed to store search results in cache", "error", err)
+		} else {
+			slog.Info("Stored search results in cache", "key", cacheKey)
+		}
+	}
+	return parsed, err
 }

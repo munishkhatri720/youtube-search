@@ -1,9 +1,14 @@
 logging:
   no_color: false
-  level: "debug"
+  level: "info"
   format: text
   add_source: false
 
 server_addr: ":8080"
 max_visitor_count: 2
 request_timeout: 10
+caching:
+  enabled : true
+  cache_max_limit : -1
+  cache_dir : cache.db
+  
