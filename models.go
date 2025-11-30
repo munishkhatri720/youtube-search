@@ -52,6 +52,7 @@ type YouTubeTrack struct {
 	Type       string      `json:"type"`
 	Views      string      `json:"views"`
 	ChannelId  string      `json:"channel_id"`
+	IsLive     bool        `json:"is_live"`
 }
 
 func parseDurationText(durationStr string) int {
