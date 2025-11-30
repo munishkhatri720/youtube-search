@@ -68,7 +68,7 @@ func (srv *Server) MakeSearchHandler(searchType SearchType) http.HandlerFunc {
 
 			slog.Info("Direct video ID detected", "videoId", videoId)
 			track, err := srv.LoadVideoMetadata(req.Context(), videoId)
-			if err != nil {
+			if err != nil || track.Identifier == "" {
 				http.Error(
 					writer,
 					fmt.Sprintf("Error loading video metadata: %v", err),
