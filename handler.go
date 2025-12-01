@@ -67,6 +67,32 @@ func (srv *Server) MakeSearchHandler(searchType SearchType) http.HandlerFunc {
 			}
 
 			slog.Info("Direct video ID detected", "videoId", videoId)
+
+			// Check cache for direct video ID
+			cacheKey := "video:" + videoId
+			if srv.db != nil {
+				cachedData, err := srv.LookupCache(req.Context(), cacheKey)
+				if err != nil {
+					slog.Error("Failed to lookup cache for video ID", "error", err)
+				} else if cachedData != nil {
+					var result []YouTubeTrack
+					if err := json.Unmarshal(cachedData, &result); err != nil {
+						slog.Error("Failed to unmarshal cached video metadata", "error", err)
+					} else {
+						slog.Info("Returning cached video metadata", "videoId", videoId)
+						writer.Header().Set("Content-Type", "application/json")
+						if err := json.NewEncoder(writer).Encode(result); err != nil {
+							http.Error(
+								writer,
+								fmt.Sprintf("Error encoding response: %v", err),
+								http.StatusInternalServerError,
+							)
+						}
+						return
+					}
+				}
+			}
+
 			track, err := srv.LoadVideoMetadata(req.Context(), videoId)
 			if err != nil || track.Identifier == "" {
 				http.Error(
@@ -76,6 +102,14 @@ func (srv *Server) MakeSearchHandler(searchType SearchType) http.HandlerFunc {
 				)
 				return
 			}
+
+			// Store in cache
+			if srv.db != nil {
+				if err := srv.StoreCache(req.Context(), cacheKey, []YouTubeTrack{track}); err != nil {
+					slog.Error("Failed to store video metadata in cache", "error", err)
+				}
+			}
+
 			writer.Header().Set("Content-Type", "application/json")
 			if err := json.NewEncoder(writer).Encode([]YouTubeTrack{track}); err != nil {
 				http.Error(
@@ -177,7 +211,7 @@ func (srv *Server) LoadVideoMetadata(ctx context.Context, videoID string) (YouTu
 	}
 
 	context := map[string]any{
-		"client" : clientContext,
+		"client": clientContext,
 	}
 
 	payload := map[string]any{
@@ -223,8 +257,6 @@ func (srv *Server) LoadVideoMetadata(ctx context.Context, videoID string) (YouTu
 	if err := json.Unmarshal(respBody, &respdata); err != nil {
 		return YouTubeTrack{}, fmt.Errorf("failed to unmarshal video metadata response: %w", err)
 	}
-
-	
 
 	track := respdata.VideoDetails.ToYouTubeTrack()
 	if track.Identifier == "" && respdata.PlaybilityStatus.Status != "OK" {
