@@ -171,8 +171,17 @@ func (srv *Server) LoadVideoMetadata(ctx context.Context, videoID string) (YouTu
 		visitor.VisitorID(),
 	)
 
+	clientContext := map[string]any{
+		"clientName":    "TVHTML5_SIMPLY",
+		"clientVersion": "1.0",
+	}
+
+	context := map[string]any{
+		"client" : clientContext,
+	}
+
 	payload := map[string]any{
-		"context": visitor.Context,
+		"context": context,
 		"videoId": videoID,
 	}
 
