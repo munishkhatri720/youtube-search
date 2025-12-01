@@ -215,16 +215,11 @@ func (srv *Server) LoadVideoMetadata(ctx context.Context, videoID string) (YouTu
 		return YouTubeTrack{}, fmt.Errorf("failed to unmarshal video metadata response: %w", err)
 	}
 
-	if respdata.PlaybilityStatus.Status != "OK" {
-		return YouTubeTrack{}, fmt.Errorf(
-			"video is not playable, status: %s",
-			respdata.PlaybilityStatus.Status,
-		)
-	}
+	
 
 	track := respdata.VideoDetails.ToYouTubeTrack()
-	if track.Identifier == "" {
-		return YouTubeTrack{}, fmt.Errorf("video metadata response missing video details")
+	if track.Identifier == "" || respdata.PlaybilityStatus.Status != "OK" {
+		return YouTubeTrack{}, fmt.Errorf("failed to fetch metadata due to : %v", respdata.PlaybilityStatus.Reason)
 	}
 	return track, nil
 }
