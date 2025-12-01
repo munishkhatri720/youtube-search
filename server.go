@@ -19,34 +19,43 @@ type Server struct {
 	visitors   []*YouTubeVisitorData
 	ticker     *time.Ticker
 	Cfg        *Config
-	mu         sync.Mutex
+	mu         sync.RWMutex
 	faultCount int
 	db         *sql.DB
 }
 
 func (srv *Server) RandomVisitor(ctx context.Context, isYouTube bool) *YouTubeVisitorData {
-	srv.mu.Lock()
-	defer srv.mu.Unlock()
-	if len(srv.visitors) < srv.Cfg.MaxVisitorCount && srv.faultCount < srv.Cfg.MaxVisitorCount*2 {
-		slog.Info("Fetching new visitor data", "current_count", len(srv.visitors))
+	srv.mu.RLock()
+	needNew := len(srv.visitors) < srv.Cfg.MaxVisitorCount && srv.faultCount < srv.Cfg.MaxVisitorCount*4
+	currentCount := len(srv.visitors)
+	srv.mu.RUnlock()
+
+	if needNew {
+		slog.Info("Fetching new visitor data", "current_count", currentCount)
 		visitor, err := srv.fetchInnertubeContext(ctx, isYouTube)
 		if err == nil {
 			idx := visitor.VisitorID()
 			if len(visitor.VisitorID()) > 50 {
 				idx = visitor.VisitorID()[:50] + "..."
-
 			}
 			slog.Info(
 				"Fetched new visitor data",
 				slog.Any("visitor", idx),
 				slog.Any("isYouTube", visitor.IsYouTube),
 			)
+			srv.mu.Lock()
 			srv.visitors = append(srv.visitors, visitor)
+			srv.mu.Unlock()
 			return visitor
 		}
+		srv.mu.Lock()
 		srv.faultCount++
+		srv.mu.Unlock()
 		slog.Error("Failed to fetch visitor data", "error", err, "fault_count", srv.faultCount)
 	}
+
+	srv.mu.RLock()
+	defer srv.mu.RUnlock()
 
 	var filtered []*YouTubeVisitorData
 	for _, v := range srv.visitors {
@@ -70,30 +79,49 @@ func (srv *Server) RotateVisitors(ctx context.Context) {
 			slog.Info("Stopping visitor rotation")
 			return
 		case <-srv.ticker.C:
-			srv.mu.Lock()
-			defer srv.mu.Unlock()
+			// Collect expired visitors with read lock
+			srv.mu.RLock()
 			if len(srv.visitors) == 0 {
+				srv.mu.RUnlock()
 				continue
-			} else {
-				for i, visitor := range srv.visitors {
-					if visitor.IsExpired() {
-						idx := visitor.VisitorID()
-						if len(visitor.VisitorID()) > 50 {
-							idx = visitor.VisitorID()[:50] + "..."
-
-						}
-						slog.Info("Rotating expired visitor data", slog.Any("visitor", idx))
-						newVisitor, err := srv.fetchInnertubeContext(ctx, visitor.IsYouTube)
-						if err != nil {
-							slog.Error("Failed to fetch new visitor data", "error", err)
-						} else {
-							srv.visitors[i] = newVisitor
-							slog.Info("Rotated visitor data", slog.Any("visitor", newVisitor.VisitorID()))
-						}
-					}
-				}
 			}
 
+			type expiredVisitor struct {
+				index     int
+				isYouTube bool
+				idx       string
+			}
+			var expiredList []expiredVisitor
+			for i, visitor := range srv.visitors {
+				if visitor.IsExpired() {
+					idx := visitor.VisitorID()
+					if len(visitor.VisitorID()) > 50 {
+						idx = visitor.VisitorID()[:50] + "..."
+					}
+					expiredList = append(expiredList, expiredVisitor{
+						index:     i,
+						isYouTube: visitor.IsYouTube,
+						idx:       idx,
+					})
+				}
+			}
+			srv.mu.RUnlock()
+
+			// Fetch new visitors OUTSIDE the lock
+			for _, expired := range expiredList {
+				slog.Info("Rotating expired visitor data", slog.Any("visitor", expired.idx))
+				newVisitor, err := srv.fetchInnertubeContext(ctx, expired.isYouTube)
+				if err != nil {
+					slog.Error("Failed to fetch new visitor data", "error", err)
+				} else {
+					srv.mu.Lock()
+					if expired.index < len(srv.visitors) {
+						srv.visitors[expired.index] = newVisitor
+						slog.Info("Rotated visitor data", slog.Any("visitor", newVisitor.VisitorID()))
+					}
+					srv.mu.Unlock()
+				}
+			}
 		}
 	}
 }

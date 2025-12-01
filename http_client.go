@@ -20,7 +20,7 @@ type HttpClient struct {
 	*http.Client
 	Ipv6Block string
 	cache     map[string]ipv6SupportCache
-	mu        sync.Mutex
+	mu        sync.RWMutex
 }
 
 func (client *HttpClient) OnRequest(req *http.Request) {
@@ -146,22 +146,26 @@ func (client *HttpClient) TransportDialContext(
 ) (net.Conn, error) {
 	slog.Debug("Connecting to Address", "addr", addr, "network", network)
 
-	client.mu.Lock()
-	defer client.mu.Unlock()
-
-	ipv6Supported := false
+	// Try read lock first to check cache
+	client.mu.RLock()
 	cached, ok := client.cache[addr]
-	if !ok || time.Since(cached.lastChecked) > 30*time.Minute {
+	cacheValid := ok && time.Since(cached.lastChecked) <= 30*time.Minute
+	client.mu.RUnlock()
+
+	var ipv6Supported bool
+	if !cacheValid {
 		fetched := client.IsIpv6Supported(network, addr)
+		client.mu.Lock()
 		client.cache[addr] = ipv6SupportCache{
 			lastChecked: time.Now(),
 			supported:   fetched,
 		}
-		slog.Debug("ipv6 support cache updated", "addr", addr, "supported", cached)
+		client.mu.Unlock()
+		slog.Debug("ipv6 support cache updated", "addr", addr, "supported", fetched)
 		ipv6Supported = fetched
 	} else {
 		ipv6Supported = cached.supported
-		slog.Debug("using cached ipv6 support value", "addr", addr, "supported", cached)
+		slog.Debug("using cached ipv6 support value", "addr", addr, "supported", cached.supported)
 	}
 
 	dialer := &net.Dialer{
