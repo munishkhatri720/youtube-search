@@ -36,13 +36,18 @@ func (client *HttpClient) OnRequest(req *http.Request) {
 
 		}
 	}
-	req.Header.Set("x-origin", "https://music.youtube.com")
+	if strings.Contains(req.URL.String(), "music.youtube.com") {
+		req.Header.Set("x-origin", "https://music.youtube.com")
+	} else {
+		req.Header.Set("origin", "https://www.youtube.com")
+	}
+
 	// close the tcp connection after request to rotate the ipv6 address
 	req.Header.Set("Connection", "close")
 	req.Header.Set("Cookie", "SOCS=CAI;")
 	req.Header.Set(
 		"User-Agent",
-		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3",
+		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
 	)
 }
 

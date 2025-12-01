@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -112,8 +113,15 @@ func (srv *Server) MakeSearchHandler(searchType SearchType) http.HandlerFunc {
 	}
 }
 
-func (srv *Server) fetchInnertubeContext(ctx context.Context) (*YouTubeVisitorData, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, YT_MUSIC_BASE_URL, nil)
+func (srv *Server) fetchInnertubeContext(
+	ctx context.Context,
+	isYouTube bool,
+) (*YouTubeVisitorData, error) {
+	url := YT_MUSIC_BASE_URL
+	if isYouTube {
+		url = YT_BASE_URL
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -131,6 +139,18 @@ func (srv *Server) fetchInnertubeContext(ctx context.Context) (*YouTubeVisitorDa
 
 	matches := innertubeContextPattern.FindSubmatch(respBody)
 	if len(matches) < 2 {
+		file, err := os.Create("resp.html")
+		if err == nil {
+			defer file.Close()
+			_, err := file.Write(respBody)
+			if err != nil {
+				slog.Error("failed to dump response body", "error", err)
+			} else {
+				slog.Info("dumped problematic response to resp.html for analysis")
+			}
+		} else {
+			slog.Error("failed to create dump.txt for writing", "error", err)
+		}
 		return nil, fmt.Errorf("failed to find INNERTUBE_CONTEXT in response")
 	}
 
@@ -140,11 +160,11 @@ func (srv *Server) fetchInnertubeContext(ctx context.Context) (*YouTubeVisitorDa
 	if err := json.Unmarshal([]byte(contextString), &contextData); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal INNERTUBE_CONTEXT: %w", err)
 	}
-	return NewYouTubeVisitor(contextData), nil
+	return NewYouTubeVisitor(contextData, isYouTube), nil
 }
 
 func (srv *Server) LoadVideoMetadata(ctx context.Context, videoID string) (YouTubeTrack, error) {
-	visitor := srv.RandomVisitor()
+	visitor := srv.RandomVisitor(ctx, true)
 
 	vCtx := context.WithValue(
 		ctx,
@@ -246,7 +266,7 @@ func (srv *Server) searchFromYouTube(
 			}
 		}
 	}
-	visitor := srv.RandomVisitor()
+	visitor := srv.RandomVisitor(ctx, searchType == SearchTypeYouTube)
 
 	vCtx := context.WithValue(
 		ctx,
@@ -259,11 +279,10 @@ func (srv *Server) searchFromYouTube(
 		"query":   query,
 	}
 
-	switch searchType {
-	case SearchTypeYouTube:
-		payload["params"] = YT_VIDEO_FILTER_PARAM
-	case SearchTypeYouTubeMusic:
+	if searchType == SearchTypeYouTubeMusic {
 		payload["params"] = YT_SONG_FILTER_PARAM
+	} else {
+		payload["params"] = YT_VIDEO_FILTER_PARAM
 	}
 
 	reqBody, err := json.Marshal(payload)
@@ -296,8 +315,17 @@ func (srv *Server) searchFromYouTube(
 		return nil, fmt.Errorf("failed to read search response body: %w", err)
 	}
 
-	parsed, err := parseYouTubeSearchResults(respBody)
-	if err == nil && len(parsed) > 0 && srv.db != nil {
+	var parsed []YouTubeTrack
+	var parseErr error
+
+	switch searchType {
+	case SearchTypeYouTube:
+		parsed, parseErr = parseYouTubeSearchResults(respBody)
+	case SearchTypeYouTubeMusic:
+		parsed, parseErr = parseYouTubeMusicSearchResults(respBody)
+	}
+
+	if parseErr == nil && len(parsed) > 0 && srv.db != nil {
 		cacheKey := srv.createCacheKey(searchType, query)
 		if err := srv.StoreCache(vCtx, cacheKey, parsed); err != nil {
 			slog.Error("Failed to store search results in cache", "error", err)
@@ -310,5 +338,5 @@ func (srv *Server) searchFromYouTube(
 			item.Uri = "https://www.youtube.com/watch?v=" + item.Identifier
 		}
 	}
-	return parsed, err
+	return parsed, parseErr
 }

@@ -14,6 +14,7 @@ import (
 type YouTubeVisitorData struct {
 	Context   map[string]any `json:"context"`
 	CreatedAt time.Time      `json:"createdAt"`
+	IsYouTube bool           `json:"isYouTube"`
 }
 
 func (v *YouTubeVisitorData) IsExpired() bool {
@@ -29,10 +30,11 @@ func (v *YouTubeVisitorData) VisitorID() string {
 	return id
 }
 
-func NewYouTubeVisitor(context map[string]any) *YouTubeVisitorData {
+func NewYouTubeVisitor(context map[string]any, isYoutube bool) *YouTubeVisitorData {
 	return &YouTubeVisitorData{
 		Context:   context,
 		CreatedAt: time.Now(),
+		IsYouTube: isYoutube,
 	}
 }
 
@@ -73,7 +75,7 @@ func parseDurationText(durationStr string) int {
 	return totalSeconds * 1000
 }
 
-func parseYouTubeTrack(item gjson.Result) (YouTubeTrack, error) {
+func parseYouTubeMusicTrack(item gjson.Result) (YouTubeTrack, error) {
 
 	itemRenderer := item.Get("musicResponsiveListItemRenderer")
 	if !itemRenderer.Exists() {
@@ -99,44 +101,25 @@ func parseYouTubeTrack(item gjson.Result) (YouTubeTrack, error) {
 	length := ""
 	views := ""
 	author := ""
-	if len(flexColumns) <= 2 {
-		flexColumnsRuns := itemRenderer.Get(
-			"flexColumns.1.musicResponsiveListItemFlexColumnRenderer.text.runs",
-		).Array()
-		for _, run := range flexColumnsRuns {
-			text := run.Get("text").String()
-			if strings.TrimSpace(text) == "•" {
-				break
-			}
+
+	if len(flexColumns) < 3 {
+		return YouTubeTrack{}, fmt.Errorf("expected 3 flex columns, got %d", len(flexColumns))
+	}
+
+	authorAndLengthRuns := flexColumns[1].Get("musicResponsiveListItemFlexColumnRenderer.text.runs").
+		Array()
+	for _, run := range authorAndLengthRuns {
+		text := run.Get("text").String()
+
+		if strings.TrimSpace(text) == "•" {
+			break
+		} else {
 			author += text
 		}
-
-		if len(flexColumnsRuns) >= 5 &&
-			strings.TrimSpace(flexColumnsRuns[len(flexColumnsRuns)-2].Get("text").String()) == "•" {
-			if strings.Contains(
-				flexColumnsRuns[len(flexColumnsRuns)-3].Get("text").String(),
-				"views",
-			) {
-				views = flexColumnsRuns[len(flexColumnsRuns)-3].Get("text").String()
-			}
-
-		}
-		length = flexColumnsRuns[len(flexColumnsRuns)-1].Get("text").String()
-
-	} else {
-		authorAndLengthRuns := flexColumns[1].Get("musicResponsiveListItemFlexColumnRenderer.text.runs").Array()
-		for _, run := range authorAndLengthRuns {
-			text := run.Get("text").String()
-
-			if strings.TrimSpace(text) == "•" {
-				continue
-			} else {
-				author += text
-			}
-		}
-		length = authorAndLengthRuns[len(authorAndLengthRuns)-1].Get("text").String()
-		views = flexColumns[2].Get("musicResponsiveListItemFlexColumnRenderer.text.runs.0.text").String()
 	}
+	length = authorAndLengthRuns[len(authorAndLengthRuns)-1].Get("text").String()
+	views = flexColumns[2].Get("musicResponsiveListItemFlexColumnRenderer.text.runs.0.text").
+		String()
 
 	videoId := itemRenderer.Get("playlistItemData.videoId").String()
 	uri := fmt.Sprintf("https://music.youtube.com/watch?v=%s", videoId)
@@ -189,7 +172,7 @@ outer:
 
 }
 
-func parseYouTubeSearchResults(data []byte) ([]YouTubeTrack, error) {
+func parseYouTubeMusicSearchResults(data []byte) ([]YouTubeTrack, error) {
 	result := gjson.GetBytes(
 		data,
 		"contents.tabbedSearchResultsRenderer.tabs.0.tabRenderer.content.sectionListRenderer.contents.0.musicShelfRenderer.contents",
@@ -203,6 +186,81 @@ func parseYouTubeSearchResults(data []byte) ([]YouTubeTrack, error) {
 	if !result.IsArray() {
 		return nil, fmt.Errorf(
 			"expected musicShelfRenderer.contents to be an array but got : %v",
+			result.Type.String(),
+		)
+	}
+	tracks := make([]YouTubeTrack, 0)
+	for _, item := range result.Array() {
+		track, err := parseYouTubeMusicTrack(item)
+		if err != nil {
+			slog.Debug("Skipping item due to error", tint.Err(err))
+			continue
+		}
+		tracks = append(tracks, track)
+	}
+	return tracks, nil
+}
+
+func parseYouTubeTrack(item gjson.Result) (YouTubeTrack, error) {
+
+	itemRenderer := item.Get("videoRenderer")
+	if !itemRenderer.Exists() {
+		return YouTubeTrack{}, fmt.Errorf("videoRenderer not found")
+	}
+	thumbnails := []Thumbnail{}
+	thumbnailArray := itemRenderer.Get("thumbnail.thumbnails")
+	if thumbnailArray.Exists() && thumbnailArray.IsArray() {
+		for _, thumb := range thumbnailArray.Array() {
+			thumbnails = append(thumbnails, Thumbnail{
+				Url:    thumb.Get("url").String(),
+				Width:  int(thumb.Get("width").Int()),
+				Height: int(thumb.Get("height").Int()),
+			})
+		}
+	}
+
+	title := itemRenderer.Get("title.runs.0.text").String()
+	author := itemRenderer.Get("ownerText.runs.0.text").String()
+	length := itemRenderer.Get("lengthText.simpleText").String()
+	videoId := itemRenderer.Get("videoId").String()
+	uri := fmt.Sprintf("https://www.youtube.com/watch?v=%s", videoId)
+	views := itemRenderer.Get("viewCountText.simpleText").String()
+	channelId := itemRenderer.Get("ownerText.runs.0.navigationEndpoint.browseEndpoint.browseId").
+		String()
+
+	lengthInt := parseDurationText(length)
+	if lengthInt == 0 {
+		return YouTubeTrack{}, fmt.Errorf("failed to parse duration: %v", length)
+	}
+
+	track := YouTubeTrack{
+		Title:      title,
+		Author:     author,
+		Identifier: videoId,
+		Images:     thumbnails,
+		Length:     lengthInt,
+		Uri:        uri,
+		Type:       "video",
+		Views:      views,
+		ChannelId:  channelId,
+	}
+
+	return track, nil
+}
+
+func parseYouTubeSearchResults(data []byte) ([]YouTubeTrack, error) {
+	result := gjson.GetBytes(
+		data,
+		"contents.twoColumnSearchResultsRenderer.primaryContents.sectionListRenderer.contents.0.itemSectionRenderer.contents",
+	)
+	if !result.Exists() {
+		return nil, fmt.Errorf(
+			"array of videoRenderer doesn't found in the data",
+		)
+	}
+	if !result.IsArray() {
+		return nil, fmt.Errorf(
+			"expected itemSectionRenderer.contents to be an array but got : %v",
 			result.Type.String(),
 		)
 	}

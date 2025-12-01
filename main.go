@@ -57,7 +57,11 @@ func main() {
 	server.ticker = time.NewTicker(30 * time.Minute)
 
 	for i := 0; i < cfg.MaxVisitorCount; i++ {
-		visitor, err := server.fetchInnertubeContext(ctx)
+		isYoutube := false
+		if i%2 != 0 {
+			isYoutube = true
+		}
+		visitor, err := server.fetchInnertubeContext(shutdownCtx, isYoutube)
 		if err != nil {
 			slog.Error("Failed to fetch visitor data", "error", err)
 		} else {

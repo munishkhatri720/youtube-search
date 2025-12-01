@@ -24,19 +24,23 @@ type Server struct {
 	db         *sql.DB
 }
 
-func (srv *Server) RandomVisitor() *YouTubeVisitorData {
+func (srv *Server) RandomVisitor(ctx context.Context, isYouTube bool) *YouTubeVisitorData {
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
 	if len(srv.visitors) < srv.Cfg.MaxVisitorCount && srv.faultCount < srv.Cfg.MaxVisitorCount*2 {
 		slog.Info("Fetching new visitor data", "current_count", len(srv.visitors))
-		visitor, err := srv.fetchInnertubeContext(context.Background())
+		visitor, err := srv.fetchInnertubeContext(ctx, isYouTube)
 		if err == nil {
 			idx := visitor.VisitorID()
 			if len(visitor.VisitorID()) > 50 {
 				idx = visitor.VisitorID()[:50] + "..."
 
 			}
-			slog.Info("Fetched new visitor data", slog.Any("visitor", idx))
+			slog.Info(
+				"Fetched new visitor data",
+				slog.Any("visitor", idx),
+				slog.Any("isYouTube", visitor.IsYouTube),
+			)
 			srv.visitors = append(srv.visitors, visitor)
 			return visitor
 		}
@@ -44,8 +48,19 @@ func (srv *Server) RandomVisitor() *YouTubeVisitorData {
 		slog.Error("Failed to fetch visitor data", "error", err, "fault_count", srv.faultCount)
 	}
 
-	randomIndex := rand.IntN(len(srv.visitors))
-	return srv.visitors[randomIndex]
+	var filtered []*YouTubeVisitorData
+	for _, v := range srv.visitors {
+		if v.IsYouTube == isYouTube {
+			filtered = append(filtered, v)
+		}
+	}
+
+	if len(filtered) == 0 {
+		return nil
+	}
+
+	randomIndex := rand.IntN(len(filtered))
+	return filtered[randomIndex]
 }
 
 func (srv *Server) RotateVisitors(ctx context.Context) {
@@ -68,7 +83,7 @@ func (srv *Server) RotateVisitors(ctx context.Context) {
 
 						}
 						slog.Info("Rotating expired visitor data", slog.Any("visitor", idx))
-						newVisitor, err := srv.fetchInnertubeContext(ctx)
+						newVisitor, err := srv.fetchInnertubeContext(ctx, visitor.IsYouTube)
 						if err != nil {
 							slog.Error("Failed to fetch new visitor data", "error", err)
 						} else {
