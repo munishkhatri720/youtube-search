@@ -227,7 +227,7 @@ func (srv *Server) LoadVideoMetadata(ctx context.Context, videoID string) (YouTu
 	
 
 	track := respdata.VideoDetails.ToYouTubeTrack()
-	if track.Identifier == "" || respdata.PlaybilityStatus.Status != "OK" {
+	if track.Identifier == "" && respdata.PlaybilityStatus.Status != "OK" {
 		return YouTubeTrack{}, fmt.Errorf("failed to fetch metadata due to : %v", respdata.PlaybilityStatus.Reason)
 	}
 	return track, nil
