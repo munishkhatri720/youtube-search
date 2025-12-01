@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -185,7 +184,7 @@ func (srv *Server) LoadVideoMetadata(ctx context.Context, videoID string) (YouTu
 	req, err := http.NewRequestWithContext(
 		vCtx,
 		http.MethodPost,
-		YT_MUSIC_BASE_URL+"/youtubei/v1/player?prettyPrint=false",
+		YT_BASE_URL+"/youtubei/v1/player",
 		bytes.NewReader(reqBody),
 	)
 	if err != nil {
@@ -210,38 +209,22 @@ func (srv *Server) LoadVideoMetadata(ctx context.Context, videoID string) (YouTu
 		return YouTubeTrack{}, fmt.Errorf("failed to read video metadata response body: %w", err)
 	}
 
-	var respdata struct {
-		VideoDetails struct {
-			Title         string `json:"title"`
-			Author        string `json:"author"`
-			VideoID       string `json:"videoId"`
-			LengthSeconds string `json:"lengthSeconds"`
-			ViewCount     string `json:"viewCount"`
-			ChannelID     string `json:"channelId"`
-			IsLiveContent bool   `json:"isLiveContent"`
-			Thumbnail     struct {
-				Thumbnails []Thumbnail `json:"thumbnails"`
-			} `json:"thumbnail"`
-		} `json:"videoDetails"`
-	}
+	var respdata YouTubePlayerResponse
 
 	if err := json.Unmarshal(respBody, &respdata); err != nil {
 		return YouTubeTrack{}, fmt.Errorf("failed to unmarshal video metadata response: %w", err)
 	}
 
-	lengthMS, _ := strconv.Atoi(respdata.VideoDetails.LengthSeconds)
-	lengthMS = lengthMS * 1000
-	track := YouTubeTrack{
-		Title:      respdata.VideoDetails.Title,
-		Author:     respdata.VideoDetails.Author,
-		Identifier: respdata.VideoDetails.VideoID,
-		Images:     respdata.VideoDetails.Thumbnail.Thumbnails,
-		Length:     lengthMS,
-		Uri:        YT_BASE_URL + "/watch?v=" + respdata.VideoDetails.VideoID,
-		Type:       "video",
-		Views:      respdata.VideoDetails.ViewCount,
-		ChannelId:  respdata.VideoDetails.ChannelID,
-		IsLive:     respdata.VideoDetails.IsLiveContent,
+	if respdata.PlaybilityStatus.Status != "OK" {
+		return YouTubeTrack{}, fmt.Errorf(
+			"video is not playable, status: %s",
+			respdata.PlaybilityStatus.Status,
+		)
+	}
+
+	track := respdata.VideoDetails.ToYouTubeTrack()
+	if track.Identifier == "" {
+		return YouTubeTrack{}, fmt.Errorf("video metadata response missing video details")
 	}
 	return track, nil
 }

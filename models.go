@@ -44,6 +44,47 @@ type Thumbnail struct {
 	Height int    `json:"height"`
 }
 
+type VideoDetails struct {
+	VideoId       string `json:"videoId"`
+	Title         string `json:"title"`
+	Author        string `json:"author"`
+	LengthSeconds string `json:"lengthSeconds"`
+	ViewCount     string `json:"viewCount"`
+	ChannelId     string `json:"channelId"`
+	IsLiveContent bool   `json:"isLiveContent"`
+	Thumbnail     struct {
+		Thumbnails []Thumbnail `json:"thumbnails"`
+	} `json:"thumbnail"`
+}
+
+func (vd *VideoDetails) ToYouTubeTrack() YouTubeTrack {
+	lengthMS, _ := strconv.Atoi(vd.LengthSeconds)
+	lengthMS = lengthMS * 1000
+	return YouTubeTrack{
+		Title:      vd.Title,
+		Author:     vd.Author,
+		Identifier: vd.VideoId,
+		Images:     vd.Thumbnail.Thumbnails,
+		Length:     lengthMS,
+		Uri:        YT_BASE_URL + "/watch?v=" + vd.VideoId,
+		Type:       "video",
+		Views:      vd.ViewCount,
+		ChannelId:  vd.ChannelId,
+		IsLive:     vd.IsLiveContent,
+	}
+}
+
+type PlaybilityStatus struct {
+	Status          string `json:"status"`
+	Reason          string `json:"reason"`
+	PlayableInEmbed bool   `json:"playableInEmbed"`
+}
+
+type YouTubePlayerResponse struct {
+	PlaybilityStatus PlaybilityStatus `json:"playabilityStatus"`
+	VideoDetails     VideoDetails     `json:"videoDetails"`
+}
+
 type YouTubeTrack struct {
 	Title      string      `json:"title"`
 	Author     string      `json:"author"`

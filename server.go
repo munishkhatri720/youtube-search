@@ -26,7 +26,8 @@ type Server struct {
 
 func (srv *Server) RandomVisitor(ctx context.Context, isYouTube bool) *YouTubeVisitorData {
 	srv.mu.RLock()
-	needNew := len(srv.visitors) < srv.Cfg.MaxVisitorCount && srv.faultCount < srv.Cfg.MaxVisitorCount*4
+	needNew := len(srv.visitors) < srv.Cfg.MaxVisitorCount &&
+		srv.faultCount < srv.Cfg.MaxVisitorCount*4
 	currentCount := len(srv.visitors)
 	srv.mu.RUnlock()
 
